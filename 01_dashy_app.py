@@ -39,7 +39,6 @@ raw_covid_df = pd.read_csv(secondary_github_data_web)
 # Convert date to datetime format
 raw_covid_df['date'] =  pd.to_datetime(raw_covid_df['date'], format='%Y-%m-%d')
 
-
 # ------------- Initialize the app --------------------
 
 app = dash.Dash(external_stylesheets=[dbc.themes.BOOTSTRAP])
@@ -60,8 +59,7 @@ HEADER_STYLE = {
     "background-color": "#E8E8E8",
 }
 
-
-# the style arguments for the sidebar. We use position:fixed and a fixed width
+# the style arguments for the sidebar
 SIDEBAR_STYLE = {
     "position": "fixed",
     "top": header_height,
@@ -161,7 +159,6 @@ def process_data(p_data, p_location):
     processed_data["daily_cases"] = processed_data["daily_cases"].fillna(0)
 
     return processed_data
-
 
 # Function: add smoothed trend column (smooth_cases)
 def smooth_data(p_data, p_rolling_window):
