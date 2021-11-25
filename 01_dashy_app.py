@@ -46,7 +46,7 @@ app.config.suppress_callback_exceptions = True
 
 # ------------- App layout ------------------------
 header_height = "4rem"
-sidebar_width = "16rem"
+sidebar_width = "19vw"
 
 # style arguments for header
 HEADER_STYLE = {
@@ -76,7 +76,7 @@ CONTENT_STYLE = {
     "position": "fixed",
     "top": header_height,
     "margin-left": sidebar_width,
-    "padding": "0rem 0rem",
+    "padding": "1rem 1rem",
 }
 
 header = html.Div([
@@ -106,16 +106,16 @@ sidebar = html.Div(
                       min=1,
                       style={"margin-bottom": "10px", 'width': 180})
         ]),
-        html.Div([
-            html.Label(['R_eff'], style={'font-weight': 'bold', 'margin-right': 100}), # 100 to move Input next line
-            dcc.Input(id='input_R_eff',
-                      value=1,
-                      type='number',
-                      min=0.5,
-                      max=3,
-                      step=0.01,
-                      style={"margin-bottom": "10px", 'width': 180})
-        ])
+        # html.Div([
+        #     html.Label(['R_eff'], style={'font-weight': 'bold', 'margin-right': 100}), # 100 to move Input next line
+        #     dcc.Input(id='input_R_eff',
+        #               value=1,
+        #               type='number',
+        #               min=0.5,
+        #               max=3,
+        #               step=0.01,
+        #               style={"margin-bottom": "10px", 'width': 180})
+        # ])
     ],
     style=SIDEBAR_STYLE
 )
@@ -123,6 +123,8 @@ sidebar = html.Div(
 content = html.Div(
     id="page-content"
     , children = [
+        html.Div(id = 'text_projected_chart_title', style = {"width":"80vw", 'font-weight': 'bold'}),
+        html.Div(id = 'text_R_eff_print'),
         dcc.Graph(
             id='fig_projected_chart',
         )
@@ -136,7 +138,8 @@ app.layout = html.Div([
     content,
 
     # dcc.Store stores the intermediate data
-    dcc.Store(id='intermediate_data')
+    dcc.Store(id='intermediate_data'),
+    dcc.Store(id='est_curr_R_eff')
 ])
 
 # --------------- Functions -------------------
@@ -195,6 +198,10 @@ def estimate_R_eff(p_data, p_assum_incubation_days):
 # Function - Project cases - projection is based on exponential growth with factor
 # p_R_eff/p_assum_incubation_days
 def project_cases_from_R_eff(p_days_to_project, p_data, p_R_eff, p_assum_incubation_days):
+
+    # Convert to date (to be safe)
+    p_data['report_date'] = pd.to_datetime(p_data['report_date'], format='%Y-%m-%d')
+
     # Current date and cases
     curr_date = max(p_data["report_date"])
     curr_cases = p_data[p_data["report_date"] == curr_date]["smooth_cases"].values[0]
@@ -223,59 +230,11 @@ def project_cases_from_R_eff(p_days_to_project, p_data, p_R_eff, p_assum_incubat
 
     return new_data
 
+### Function: Plot projected claiming
+def plot_projected_claims(p_data):
 
-# ------------- App callbacks --------------------
+    plot_data = p_data
 
-# First callback to process data and update dataframe
-@app.callback(
-    Output('intermediate_data', 'data'),
-    [Input('input_location', 'value'),
-     Input('input_days_to_project', 'value')]
-)
-
-def apply_user_inputs_to_data(input_location, input_days_to_project):
-
-    print(input_location)
-
-    # Process data and fetch required cols (report_date/location/daily_cases)
-    covid_df = process_data(p_data=raw_covid_df
-                            , p_location=input_location)
-    print(covid_df)
-
-    # Add smoothed trend
-    covid_df = smooth_data(p_data=covid_df
-                            , p_rolling_window=7)
-
-    # Estimate current effective reproduction rate
-    est_curr_R_eff = estimate_R_eff(p_data=covid_df
-                                    , p_assum_incubation_days=assum_incubation_days
-                                    )
-    print(est_curr_R_eff)
-
-    # Add projections to covid_df
-    covid_df = project_cases_from_R_eff(
-        p_days_to_project=input_days_to_project
-        , p_data=covid_df
-        , p_R_eff=est_curr_R_eff
-        , p_assum_incubation_days=assum_incubation_days
-    )
-
-    return covid_df.to_json(date_format='iso', orient='split')
-
-# Second callback to plot chart from processed data
-@app.callback(
-    Output('fig_projected_chart', 'figure'),
-    [Input('intermediate_data', 'data')]
-)
-
-def plot_projected_cases(jsonified_intermediate_data):
-
-    # Read back in intermediate data stored from previous callback
-    plot_data = pd.read_json(jsonified_intermediate_data, orient='split')
-
-    print(plot_data)
-
-    ### Produce plot
     fig = go.Figure()
 
     # Trace for daily cases
@@ -302,25 +261,104 @@ def plot_projected_cases(jsonified_intermediate_data):
 
     fig.update_yaxes(rangemode="tozero")
 
-    print_location = plot_data["location"].unique()[0]
+    #print_location = plot_data["location"].unique()[0]
 
     # Update chart title and labels
     fig.update_layout(
-        title="Projected " + print_location + " COVID-19 cases, extrapolated from simple estimate of R_eff"
-        , yaxis_title="Daily cases"
+        #title="Projected " + print_location + " COVID-19 cases, extrapolated from simple estimate of R_eff"
+        yaxis_title="Daily cases"
         , legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=-0.3,
-            xanchor="right",
-            x=1)
+            y=-0.2,
+            xanchor="left",
+            x=0.2)
+        , margin={'t': 15}
     )
-
-    #fig.show()
-    print(fig)
 
     return fig
 
+
+# ------------- App callbacks --------------------
+
+# First callback to process data and update dataframe
+@app.callback(
+    [Output('intermediate_data', 'data'),
+     Output('est_curr_R_eff', 'data')],
+    [Input('input_location', 'value')]
+)
+
+def apply_user_inputs_to_data(input_location):
+
+    print("apply_user_inputs_to_data")
+    print(input_location)
+
+    # Process data and fetch required cols (report_date/location/daily_cases)
+    intermediate_data = process_data(p_data=raw_covid_df
+                            , p_location=input_location)
+
+    # Add smoothed trend
+    intermediate_data = smooth_data(p_data=intermediate_data
+                            , p_rolling_window=7)
+
+    # Estimate current effective reproduction rate
+    est_curr_R_eff = estimate_R_eff(p_data=intermediate_data
+                                    , p_assum_incubation_days=assum_incubation_days
+                                    )
+    print(est_curr_R_eff)
+
+    return intermediate_data.to_json(date_format='iso', orient='split'), est_curr_R_eff
+
+
+# Second callback to plot chart from processed data
+@app.callback(
+    Output('fig_projected_chart', 'figure'),
+    [Input('intermediate_data', 'data'),
+     Input('est_curr_R_eff', 'data'),
+     Input('input_days_to_project', 'value')]
+)
+
+def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project):
+
+    print("update_plot")
+
+    # Read back in intermediate data stored from previous callback
+    covid_df = pd.read_json(intermediate_data, orient='split')
+    print(covid_df.head())
+    print(est_curr_R_eff)
+
+    # Add projections to covid_df
+    covid_df = project_cases_from_R_eff(
+        p_days_to_project=input_days_to_project
+        , p_data=covid_df
+        , p_R_eff=est_curr_R_eff
+        , p_assum_incubation_days=assum_incubation_days
+    )
+
+    fig = plot_projected_claims(p_data = covid_df)
+    #fig.show()
+    print("fig ran")
+
+    return fig
+
+# Callbacks for text outputs
+@app.callback(
+    Output('text_projected_chart_title', 'children'),
+    [Input('input_location', 'value')]
+)
+
+def print_chart_content_title(location):
+    return 'Projected {} COVID-19 cases'.format(location)
+
+@app.callback(
+    Output('text_R_eff_print', 'children'),
+    [Input('est_curr_R_eff', 'data')]
+)
+
+def print_chart_content_title(est_curr_R_eff):
+    return 'Projected cases are based on an estimated current R_eff  of {}.'.format(est_curr_R_eff)
+
+
 # ------------------ Run app -----------------------
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=False)
