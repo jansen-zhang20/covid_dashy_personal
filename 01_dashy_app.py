@@ -21,9 +21,11 @@ import plotly.graph_objects as go
 
 import pandas as pd
 import numpy as np
+from pandas import Timestamp
 # Tell pandas to print more columns
 # pd.set_option('display.max_columns', 500)
 
+import datetime
 from datetime import date, timedelta
 
 
@@ -39,20 +41,32 @@ assum_start_date = pd.to_datetime('today') - timedelta(days = assum_days_to_show
 assum_incubation_days = 5
 
 # ---------- Load and process data ------------------
-raw_covid_df = pd.read_csv(secondary_github_data_web)
 
-# Convert date to datetime format
-raw_covid_df['date'] =  pd.to_datetime(raw_covid_df['date'], format='%Y-%m-%d')
+raw_covid_df = pd.read_csv(secondary_github_data_web)\
+    .sort_values(by = ['date'], ascending = False)
 
 # Compute max_date in data
 max_date = max(raw_covid_df["date"])
 
 # ------------- Initialize the app --------------------
 
-app = dash.Dash(external_stylesheets=[dbc.themes.BOOTSTRAP])
+app = dash.Dash(external_stylesheets=[
+    dbc.themes.BOOTSTRAP,
+    { # font-awesome
+            "href": "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css",
+            "rel": "stylesheet",
+            "integrity": "sha512-iBBXm8fW90+nuLcSKlbmrPcLa0OT92xO1BIsZ+ywDWZCvqsWgccV3gFoRBv0z+8dLJgyAHIhR35VZc2oM/gI1w==",
+            "crossorigin": "anonymous",
+            "referrerpolicy": "no-referrer",
+        }
+])
 app.config.suppress_callback_exceptions = True
 
 # ------------- App layout ------------------------
+# In Shiny, I would move all this UI stuff into a ui.R script - investigate best practice in Dash
+
+### Styles ---
+
 header_height = "4rem"
 sidebar_width = "19vw"
 
@@ -87,8 +101,11 @@ CONTENT_STYLE = {
     "padding": "1rem 1rem",
 }
 
+### Define UI - header, sidebar, content ---
+
 header = html.Div([
-    html.H3('COVID-19 case tracker', style={"vertical-align": "middle"})
+    html.Div(html.I(className="fas fa-viruses", style={"font-size": "30px", "padding-right":"10px"}), style={'display': 'inline-block'}),
+    html.Div(html.H3('COVID-19 case tracker', style={"vertical-align": "middle"}), style={'display': 'inline-block'})
     ], style=HEADER_STYLE
 )
 
@@ -114,16 +131,6 @@ sidebar = html.Div(
                       min=1,
                       style={"margin-bottom": "10px", 'width': 180})
         ]),
-        # html.Div([
-        #     html.Label(['R_eff'], style={'font-weight': 'bold', 'margin-right': 100}), # 100 to move Input next line
-        #     dcc.Input(id='input_R_eff',
-        #               value=1,
-        #               type='number',
-        #               min=0.5,
-        #               max=3,
-        #               step=0.01,
-        #               style={"margin-bottom": "10px", 'width': 180})
-        # ])
     ],
     style=SIDEBAR_STYLE
 )
@@ -138,7 +145,7 @@ TAB_SELECTED_STYLE = {'padding': '0',
 content = html.Div(
     id="page-content"
     , children = [
-        dcc.Tabs(
+        dcc.Tabs( # Tabs go under here as a subset of content
             style = {'width': '40%','height':tab_height},
             children = [
                 # Main tab
@@ -154,7 +161,7 @@ content = html.Div(
                 ]),
 
                 # Data table
-                dcc.Tab(label = 'Data'
+                dcc.Tab(label = 'Raw data'
                         , style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE
                         , children = [
                         html.P(""),
@@ -169,8 +176,12 @@ content = html.Div(
                             page_action="native",
                             page_current=0,
                             page_size=10,
+                            style_header={'fontWeight': 'bold'},
+                            style_cell={'font-family':'Segoe UI'},
                             style_table={'overflowX': 'auto',
                                          "width": "77vw"},
+                            # fix left-most column getting cut off
+                            css=[{'selector': '.row', 'rule': 'margin: 0'}]
                         )
                     ]),
 
@@ -179,14 +190,46 @@ content = html.Div(
                     , style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE
                     , children = [
                         html.P(""),
-                        html.P("About", style={"width": "80vw"})
-                ])
+                        html.P("This is a personal project to build a simple COVID-19 tracker for Australia using Dash Python.",
+                               style={"width": "80vw"}),
+
+                        html.P("Methodology", style={"font-weight": "bold"}),
+                        html.P("To calculate a smooth trend, a simple methodology taking a rolling 7-day average of daily cases was applied to account for daily variability"
+                               + " in reported cases as well as weekly seasonality (Monday dip in reported cases). ",
+                               style={"width": "75vw"}),
+                        html.P("R_eff (the effective viral reproduction rate) is estimated by R_eff(t_current) = [cases(t_current)/cases(t_current - incubation_period)]**(1/incubation_period)"
+                               + ", with an assumed incubation period of 5 days based on most recent studies.",
+                               style={"width": "75vw"}),
+                        html.P("Projected cases extrapolates from the latest estimate of R_eff and assumes a flat growth rate. No adjustments are currently being made for changing"
+                               + " real-world factors which may impact viral spread such as vaccination uptake, easing of restrictions or increased transmission during holiday periods.",
+                               style={"width": "75vw"}),
+                        html.P(""),
+
+                        html.P("Data source", style = {"font-weight": "bold"}),
+                        html.Div(html.P("Daily COVID-19 case data sourced from aggregated secondary source"), style = {"display":"inline-block", "padding-right":"4px"}),
+                        html.Div(html.A(" here",
+                               href="https://github.com/M3IT/COVID-19_Data",
+                               target="_blank"),
+                                 style={"display": "inline-block"}),
+                        html.Div(html.P("."), style={"display": "inline-block"}),
+
+                        html.P("Source code", style = {"font-weight": "bold"}),
+                        html.Div(html.P("See Github repository for source code"),
+                                 style={"display": "inline-block", "padding-right": "4px"}),
+                        html.Div(html.A(" here",
+                                        href="https://github.com/jansen-zhang20/covid_dashy_personal",
+                                        target="_blank"),
+                                 style={"display": "inline-block"}),
+                        html.Div(html.P("."), style={"display": "inline-block"})
+
+                    ])
         ]),
 
     ],
     style=CONTENT_STYLE
 )
 
+### Tie all together
 app.layout = html.Div([
     header,
     sidebar,
@@ -198,10 +241,15 @@ app.layout = html.Div([
 ])
 
 
-# --------------- Functions -------------------
+# --------------- Functions used in callbacks -------------------
+# For later on - a cleaner way of doing this would be to move these functions into a functions folder like I would in R
+
 # Function: Collect required columns (report_date/location/daily_cases)
 def process_data(p_data, p_location):
     processed_data = p_data
+
+    # Convert date to datetime format
+    processed_data['date'] = pd.to_datetime(processed_data['date'], format='%Y-%m-%d')
 
     # Filter to location and subset required cols
     processed_data = (
@@ -219,7 +267,7 @@ def process_data(p_data, p_location):
 
     return processed_data
 
-# Function: add smoothed trend column (smooth_cases)
+# Function: Add smoothed trend column (smooth_cases)
 def smooth_data(p_data, p_rolling_window):
     # Smooth data - compute 7 day average.
     # We want to apply smoothing to remove effect of daily variability as well as the weekly Monday dip
@@ -336,6 +384,7 @@ def plot_projected_claims(p_data):
 
 
 # ------------- App callbacks --------------------
+# In Shiny, all this would go into a server.R script - investigate best practice in Dash
 
 # First callback to process data and update dataframe
 @app.callback(
@@ -392,7 +441,7 @@ def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project):
     )
 
     fig = plot_projected_claims(p_data = covid_df)
-    #fig.show()
+
     print("fig ran")
 
     return fig
@@ -413,9 +462,8 @@ def print_chart_content_title(location):
 
 def print_chart_content_title(est_curr_R_eff):
     text = 'Projected cases are based on an estimated current R_eff  of ' + str(est_curr_R_eff) + \
-            ' as at ' + str(date.strftime(max_date, '%d %B %Y')) + '.'
+            ' as at ' + str(datetime.datetime.strptime(max_date, '%Y-%m-%d').strftime('%d %B %Y')) + '.'
     return text
-    #return 'Projected cases are based on an estimated current R_eff  of {} as at max_date.'.format(est_curr_R_eff)
 
 
 # ------------------ Run app -----------------------
