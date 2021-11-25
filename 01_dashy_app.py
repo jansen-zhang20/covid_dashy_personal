@@ -11,16 +11,21 @@ import dash
 import dash_html_components as html
 import dash_core_components as dcc
 import dash_bootstrap_components as dbc
-import plotly.graph_objects as go
 from dash.dependencies import Input, Output
+import dash_table
+
+import plotly.graph_objects as go
+# To render plots to browser
+# import plotly.io as pio
+# pio.renderers.default = "browser"
 
 import pandas as pd
 import numpy as np
+# Tell pandas to print more columns
+# pd.set_option('display.max_columns', 500)
+
 from datetime import date, timedelta
 
-# Render plots to browser
-import plotly.io as pio
-pio.renderers.default = "browser"
 
 # -------------- Assumptions -----------------------
 
@@ -38,6 +43,9 @@ raw_covid_df = pd.read_csv(secondary_github_data_web)
 
 # Convert date to datetime format
 raw_covid_df['date'] =  pd.to_datetime(raw_covid_df['date'], format='%Y-%m-%d')
+
+# Compute max_date in data
+max_date = max(raw_covid_df["date"])
 
 # ------------- Initialize the app --------------------
 
@@ -86,7 +94,7 @@ header = html.Div([
 
 sidebar = html.Div(
     [
-        html.P("Manage inputs and parameters:"),
+        html.P("Select inputs:"),
         html.Div([
             html.Label(['State'], style={'font-weight': 'bold'}),
             dcc.Dropdown(id='input_location',
@@ -120,14 +128,61 @@ sidebar = html.Div(
     style=SIDEBAR_STYLE
 )
 
+# styling to make tabs a reasonable height
+tab_height = '5vh'
+TAB_STYLE = {'padding': '0',
+             'line-height': tab_height}
+TAB_SELECTED_STYLE = {'padding': '0',
+                      'line-height': tab_height}
+
 content = html.Div(
     id="page-content"
     , children = [
-        html.Div(id = 'text_projected_chart_title', style = {"width":"80vw", 'font-weight': 'bold'}),
-        html.Div(id = 'text_R_eff_print'),
-        dcc.Graph(
-            id='fig_projected_chart',
-        )
+        dcc.Tabs(
+            style = {'width': '40%','height':tab_height},
+            children = [
+                # Main tab
+                dcc.Tab(label = 'Projected cases'
+                    , style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE
+                    , children = [
+                    html.P(""),
+                    html.Div(id='text_projected_chart_title', style={"width": "80vw", 'font-weight': 'bold'}),
+                    html.Div(id='text_R_eff_print'),
+                    dcc.Graph(
+                        id='fig_projected_chart',
+                    )
+                ]),
+
+                # Data table
+                dcc.Tab(label = 'Data'
+                        , style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE
+                        , children = [
+                        html.P(""),
+                        #html.P("Showing " + str(assum_days_to_show) + " days of data:", style={"width": "70vw"}),
+                        html.P("Showing full data source:", style={"width": "77vw"}),
+                        dash_table.DataTable(
+                            data=raw_covid_df.to_dict('records'),
+                            columns=[{"name": i, "id": i} for i in raw_covid_df.columns],
+                            filter_action="native",
+                            sort_action="native",
+                            sort_mode="multi",
+                            page_action="native",
+                            page_current=0,
+                            page_size=10,
+                            style_table={'overflowX': 'auto',
+                                         "width": "77vw"},
+                        )
+                    ]),
+
+                # About text tab
+                dcc.Tab(label = 'About'
+                    , style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE
+                    , children = [
+                        html.P(""),
+                        html.P("About", style={"width": "80vw"})
+                ])
+        ]),
+
     ],
     style=CONTENT_STYLE
 )
@@ -141,6 +196,7 @@ app.layout = html.Div([
     dcc.Store(id='intermediate_data'),
     dcc.Store(id='est_curr_R_eff')
 ])
+
 
 # --------------- Functions -------------------
 # Function: Collect required columns (report_date/location/daily_cases)
@@ -356,7 +412,10 @@ def print_chart_content_title(location):
 )
 
 def print_chart_content_title(est_curr_R_eff):
-    return 'Projected cases are based on an estimated current R_eff  of {}.'.format(est_curr_R_eff)
+    text = 'Projected cases are based on an estimated current R_eff  of ' + str(est_curr_R_eff) + \
+            ' as at ' + str(date.strftime(max_date, '%d %B %Y')) + '.'
+    return text
+    #return 'Projected cases are based on an estimated current R_eff  of {} as at max_date.'.format(est_curr_R_eff)
 
 
 # ------------------ Run app -----------------------
