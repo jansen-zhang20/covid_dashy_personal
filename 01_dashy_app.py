@@ -12,6 +12,7 @@ import dash_html_components as html
 import dash_core_components as dcc
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output
+import dash_daq as daq
 import dash_table
 
 import plotly.graph_objects as go
@@ -109,6 +110,9 @@ header = html.Div([
     ], style=HEADER_STYLE
 )
 
+button_on_style = {'background-color':'green'}
+button_off_style = {'background-color':'orange'}
+
 sidebar = html.Div(
     [
         html.P("Select inputs:"),
@@ -131,6 +135,17 @@ sidebar = html.Div(
                       min=1,
                       style={"margin-bottom": "10px", 'width': 180})
         ]),
+        html.Div([
+            html.Div([
+                html.Label(['R_eff'], style={'font-weight': 'bold'})
+            ]),
+            html.Div([
+                html.Button('Estimated', id='input_use_est', n_clicks=0, style= button_on_style),
+                html.Button('Custom', id='input_use_cust', n_clicks=0, style = button_off_style)
+            ], style = {'padding-bottom':'10px'}),
+            #dcc.Input(id='input_cust_R_eff', type='number', min=0.01, max=10, step=0.01)
+        ]),
+
     ],
     style=SIDEBAR_STYLE
 )
@@ -237,7 +252,9 @@ app.layout = html.Div([
 
     # dcc.Store stores the intermediate data
     dcc.Store(id='intermediate_data'),
-    dcc.Store(id='est_curr_R_eff')
+    dcc.Store(id='est_curr_R_eff'),
+    dcc.Store(id='store_estcust_mode')
+
 ])
 
 
@@ -414,16 +431,41 @@ def apply_user_inputs_to_data(input_location):
 
     return intermediate_data.to_json(date_format='iso', orient='split'), est_curr_R_eff
 
+# Intermediate callback to change button (estimated or custom R_eff) colours on click
+# and store which button is clicked
+@app.callback(
+    [Output("input_use_est", "style"),
+     Output("input_use_cust", "style"),
+     Output("store_estcust_mode", "value")],
+    [Input("input_use_est", "n_clicks"),
+     Input("input_use_cust", "n_clicks")]
+)
+def set_active(est_clicks, cust_clicks): #*args
+    ctx = dash.callback_context
+
+    # get id of triggering button
+    button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    print(button_id)
+    print(est_clicks)
+    print(cust_clicks)
+
+    if (cust_clicks > 0) & (button_id == "input_use_cust"):
+        return button_off_style, button_on_style, button_id
+    else:
+        button_id = "input_use_est"
+        return button_on_style, button_off_style, button_id
 
 # Second callback to plot chart from processed data
 @app.callback(
     Output('fig_projected_chart', 'figure'),
     [Input('intermediate_data', 'data'),
      Input('est_curr_R_eff', 'data'),
-     Input('input_days_to_project', 'value')]
+     Input('input_days_to_project', 'value'),
+     Input('store_estcust_mode', 'value')]
 )
 
-def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project):
+def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project, store_estcust_mode):
 
     print("update_plot")
 
@@ -432,11 +474,16 @@ def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project):
     print(covid_df.head())
     print(est_curr_R_eff)
 
+    if store_estcust_mode == "input_use_est":
+        use_R_eff = est_curr_R_eff
+    else:
+        use_R_eff = 2
+
     # Add projections to covid_df
     covid_df = project_cases_from_R_eff(
         p_days_to_project=input_days_to_project
         , p_data=covid_df
-        , p_R_eff=est_curr_R_eff
+        , p_R_eff=use_R_eff
         , p_assum_incubation_days=assum_incubation_days
     )
 
@@ -457,11 +504,18 @@ def print_chart_content_title(location):
 
 @app.callback(
     Output('text_R_eff_print', 'children'),
-    [Input('est_curr_R_eff', 'data')]
+    [Input('est_curr_R_eff', 'data'),
+     Input('store_estcust_mode', 'value')]
 )
 
-def print_chart_content_title(est_curr_R_eff):
-    text = 'Projected cases are based on an estimated current R_eff  of ' + str(est_curr_R_eff) + \
+def print_chart_content_title(est_curr_R_eff, store_estcust_mode):
+
+    if store_estcust_mode == "input_use_est":
+        insert = 'an estimated current R_eff  of ' + str(est_curr_R_eff)
+    else:
+        insert = 'inputted R_eff of ' + str(2)
+
+    text = 'Projected cases are based on ' + insert + \
             ' as at ' + str(datetime.datetime.strptime(max_date, '%Y-%m-%d').strftime('%d %B %Y')) + '.'
     return text
 
