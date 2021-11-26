@@ -111,7 +111,7 @@ header = html.Div([
 )
 
 button_on_style = {'background-color':'green'}
-button_off_style = {'background-color':'orange'}
+button_off_style = {'background-color':"#ECE8E4"}
 
 sidebar = html.Div(
     [
@@ -143,7 +143,11 @@ sidebar = html.Div(
                 html.Button('Estimated', id='input_use_est', n_clicks=0, style= button_on_style),
                 html.Button('Custom', id='input_use_cust', n_clicks=0, style = button_off_style)
             ], style = {'padding-bottom':'10px'}),
-            #dcc.Input(id='input_cust_R_eff', type='number', min=0.01, max=10, step=0.01)
+            # separate div to conditionally show
+            html.Div(id = "div_cond_input"
+                     , children = [dcc.Input(id='input_cust_R_eff', value=None, type='number', min=0.01, max=10, step=0.01,
+                                             style = {"width": 180})]
+                     , style = {"display":"none"})
         ]),
 
     ],
@@ -436,7 +440,8 @@ def apply_user_inputs_to_data(input_location):
 @app.callback(
     [Output("input_use_est", "style"),
      Output("input_use_cust", "style"),
-     Output("store_estcust_mode", "value")],
+     Output("store_estcust_mode", "value"),
+     Output('div_cond_input', 'style')],
     [Input("input_use_est", "n_clicks"),
      Input("input_use_cust", "n_clicks")]
 )
@@ -451,10 +456,10 @@ def set_active(est_clicks, cust_clicks): #*args
     print(cust_clicks)
 
     if (cust_clicks > 0) & (button_id == "input_use_cust"):
-        return button_off_style, button_on_style, button_id
+        return button_off_style, button_on_style, button_id, {"display":"block"}
     else:
         button_id = "input_use_est"
-        return button_on_style, button_off_style, button_id
+        return button_on_style, button_off_style, button_id, {"display":"none"}
 
 # Second callback to plot chart from processed data
 @app.callback(
@@ -462,10 +467,11 @@ def set_active(est_clicks, cust_clicks): #*args
     [Input('intermediate_data', 'data'),
      Input('est_curr_R_eff', 'data'),
      Input('input_days_to_project', 'value'),
-     Input('store_estcust_mode', 'value')]
+     Input('store_estcust_mode', 'value'),
+     Input('input_cust_R_eff', 'value')]
 )
 
-def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project, store_estcust_mode):
+def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project, store_estcust_mode, input_cust_R_eff):
 
     print("update_plot")
 
@@ -477,7 +483,7 @@ def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project, store_
     if store_estcust_mode == "input_use_est":
         use_R_eff = est_curr_R_eff
     else:
-        use_R_eff = 2
+        use_R_eff = input_cust_R_eff
 
     # Add projections to covid_df
     covid_df = project_cases_from_R_eff(
@@ -505,15 +511,16 @@ def print_chart_content_title(location):
 @app.callback(
     Output('text_R_eff_print', 'children'),
     [Input('est_curr_R_eff', 'data'),
-     Input('store_estcust_mode', 'value')]
+     Input('store_estcust_mode', 'value'),
+     Input('input_cust_R_eff', 'value')]
 )
 
-def print_chart_content_title(est_curr_R_eff, store_estcust_mode):
+def print_chart_content_title(est_curr_R_eff, store_estcust_mode, input_cust_R_eff):
 
     if store_estcust_mode == "input_use_est":
         insert = 'an estimated current R_eff  of ' + str(est_curr_R_eff)
     else:
-        insert = 'inputted R_eff of ' + str(2)
+        insert = 'inputted R_eff of ' + str(input_cust_R_eff)
 
     text = 'Projected cases are based on ' + insert + \
             ' as at ' + str(datetime.datetime.strptime(max_date, '%Y-%m-%d').strftime('%d %B %Y')) + '.'
