@@ -12,9 +12,11 @@ import dash_html_components as html
 import dash_core_components as dcc
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output
+import dash_daq as daq
 import dash_table
 
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 # To render plots to browser
 # import plotly.io as pio
 # pio.renderers.default = "browser"
@@ -33,12 +35,13 @@ from datetime import date, timedelta
 
 secondary_github_data_web = 'https://raw.githubusercontent.com/M3IT/COVID-19_Data/master/Data/COVID_AU_state.csv'
 
-assum_days_to_show = 60
-assum_start_date = pd.to_datetime('today') - timedelta(days = assum_days_to_show)
-
 # Assumption for length of incubation period in days
 # Literature seems to suggest between 5-7 days
 assum_incubation_days = 5
+
+# Assumptions for R_eff for scenarios
+assum_stable = 1.02
+assum_worse = 1.35
 
 # ---------- Load and process data ------------------
 
@@ -109,6 +112,9 @@ header = html.Div([
     ], style=HEADER_STYLE
 )
 
+button_on_style = {'background-color':'green', "color": "white"}
+button_off_style = {'background-color':"#ECE8E4"}
+
 sidebar = html.Div(
     [
         html.P("Select inputs:"),
@@ -126,11 +132,61 @@ sidebar = html.Div(
         html.Div([
             html.Label(['Days to project'], style={'font-weight': 'bold'}),
             dcc.Input(id='input_days_to_project',
-                      value=14,
+                      value=30,
                       type='number',
                       min=1,
                       style={"margin-bottom": "10px", 'width': 180})
         ]),
+        html.Div([
+            html.Div([
+                html.Div(html.Label(['R_eff value'], style={'font-weight': 'bold', 'padding-right':'5px'}), style={'display': 'inline-block'}),
+                html.Div(id = 'info_R_eff',
+                         children = [html.I(className="fas fa-info-circle")]
+                         , style={'display': 'inline-block'}),
+                # tooltip linked to the div for the info circle
+                dbc.Tooltip(
+                    "R_eff is the effective reproduction number "
+                    "which represents the transmission rate of the virus in "
+                    "the population. "
+                    "Select 'Estimated' for projection using estimated value "
+                    "of current R_eff, or 'Custom' to input your own.",
+                    target="info_R_eff",
+                    placement="right"
+                ),
+            ]),
+            html.Div([
+                html.Button('Estimated', id='input_use_est', n_clicks=0, style= button_on_style),
+                html.Button('Custom', id='input_use_cust', n_clicks=0, style = button_off_style)
+            ], style = {'padding-bottom':'10px'}),
+            # separate div to conditionally show
+            html.Div(id = "div_cond_input"
+                     , children = [dbc.Input(id='input_cust_R_eff', value=None, type='number', min=0.01, max=10, step=0.01,
+                                             placeholder = 'Input value',
+                                             style = {"width": 180}),
+                                   html.P("or select from pre-specified scenarios below:",
+                                          style={"color":"grey", "margin-top":'5px', "margin-bottom":'5px'}),
+
+                                   html.Button('Stable',
+                                               id='input_scenario_stable',
+                                               style = {'background-color':"#A10559", "color": "white"}),
+                                   dbc.Tooltip(
+                                       "Simple scenario where cases remain fairly stable, with R_eff of " + str(assum_stable),
+                                       target="input_scenario_stable",
+                                       placement="bottom"
+                                   ),
+
+                                   html.Button('Worse',
+                                               id='input_scenario_worse',
+                                               style = {'background-color':"#CC5500", "color": "white"}),
+                                   dbc.Tooltip(
+                                       "Simple scenario where cases are growing, with R_eff of " + str(assum_worse),
+                                       target="input_scenario_worse",
+                                       placement="bottom"
+                                   ),
+                                   ]
+                     , style = {"display":"none"})
+        ]),
+
     ],
     style=SIDEBAR_STYLE
 )
@@ -155,8 +211,9 @@ content = html.Div(
                     html.P(""),
                     html.Div(id='text_projected_chart_title', style={"width": "80vw", 'font-weight': 'bold'}),
                     html.Div(id='text_R_eff_print'),
-                    dcc.Graph(
-                        id='fig_projected_chart',
+                    dbc.Spinner( # add spinner to chart while it loads
+                        children = [dcc.Graph(id='fig_projected_chart')],
+                        spinner_style={"width": "3rem", "height": "3rem"}
                     )
                 ]),
 
@@ -197,7 +254,7 @@ content = html.Div(
                         html.P("To calculate a smooth trend, a simple methodology taking a rolling 7-day average of daily cases was applied to account for daily variability"
                                + " in reported cases as well as weekly seasonality (Monday dip in reported cases). ",
                                style={"width": "75vw"}),
-                        html.P("R_eff (the effective viral reproduction rate) is estimated by R_eff(t_current) = [cases(t_current)/cases(t_current - incubation_period)]**(1/incubation_period)"
+                        html.P("R_eff (the effective viral reproduction rate) is estimated by R_eff(t_current) = [cases(t_current)/cases(t_current - 1)]**incubation_period"
                                + ", with an assumed incubation period of 5 days based on most recent studies.",
                                style={"width": "75vw"}),
                         html.P("Projected cases extrapolates from the latest estimate of R_eff and assumes a flat growth rate. No adjustments are currently being made for changing"
@@ -237,7 +294,9 @@ app.layout = html.Div([
 
     # dcc.Store stores the intermediate data
     dcc.Store(id='intermediate_data'),
-    dcc.Store(id='est_curr_R_eff')
+    dcc.Store(id='est_curr_R_eff'),
+    dcc.Store(id='store_estcust_mode')
+
 ])
 
 
@@ -278,26 +337,22 @@ def smooth_data(p_data, p_rolling_window):
         .mean() \
         .round(0)
 
-    # Filter only last [assum_start_date = 60] days - also drops NaNs from rolling avg so we can convert to int
-    smoothed_data = smoothed_data.query("report_date >= @assum_start_date")
-    smoothed_data["smooth_cases"] = smoothed_data["smooth_cases"].astype(int)
+    smoothed_data["smooth_cases"] = smoothed_data["smooth_cases"].astype('Int64')
 
     return smoothed_data
 
 # Function - Simple estimate of current effective reproductive factor of the virus, based on the growth rate over the
 # last [assum_incubation_days = 5] days
 def estimate_R_eff(p_data, p_assum_incubation_days):
-    max_date = max(p_data["report_date"])
-    lag_date = max_date - timedelta(days=p_assum_incubation_days)
+    #R_eff = (curr_cases / lag_cases) ** (1 / p_assum_incubation_days)
 
-    curr_cases = p_data[p_data["report_date"] == max_date]["smooth_cases"].values[0]
-    lag_cases = p_data[p_data["report_date"] == lag_date]["smooth_cases"].values[0]
+    added_data = p_data
 
-    R_eff = (curr_cases / lag_cases) ** (1 / assum_incubation_days)
+    added_data["lag_cases"] = added_data["smooth_cases"].shift(1)
+    added_data["R_eff"] = (added_data["smooth_cases"] / added_data["lag_cases"]) ** p_assum_incubation_days
+    added_data["R_eff"] = round(added_data["R_eff"], 2)
 
-    R_eff = round(R_eff, 2)
-
-    return R_eff
+    return added_data
 
 # Function - Project cases - projection is based on exponential growth with factor
 # p_R_eff/p_assum_incubation_days
@@ -327,6 +382,7 @@ def project_cases_from_R_eff(p_days_to_project, p_data, p_R_eff, p_assum_incubat
         , 'daily_cases': np.repeat(np.NaN, p_days_to_project)
         , 'smooth_cases': np.repeat(np.NaN, p_days_to_project)
         , 'projected_cases': proj_cases.values
+        , 'projected_R_eff': np.repeat(p_R_eff, p_days_to_project)
     }
     projected_df = pd.DataFrame(projected_df)
 
@@ -339,7 +395,11 @@ def plot_projected_claims(p_data):
 
     plot_data = p_data
 
-    fig = go.Figure()
+    plot_data['report_date'] = pd.to_datetime(plot_data['report_date'], format='%Y-%m-%d', utc = True)
+
+    #fig = go.Figure()
+    # Create figure with secondary y-axis
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
 
     # Trace for daily cases
     fig.add_trace(
@@ -363,21 +423,76 @@ def plot_projected_claims(p_data):
                    , line=dict(dash='dash')
                    , name="Projected cases"))
 
-    fig.update_yaxes(rangemode="tozero")
+    # Trace for R_eff
+    fig.add_trace(
+        go.Scatter(x=plot_data['report_date']
+                   , y=plot_data["R_eff"]
+                   , name="Estimated R_eff"
+                   , line=dict(color="grey")),
+        secondary_y=True,
+    )
 
-    #print_location = plot_data["location"].unique()[0]
+    # Trace for projected R_eff
+    fig.add_trace(
+        go.Scatter(x=plot_data['report_date']
+                   , y=plot_data["projected_R_eff"]
+                   , name = "Projected R_eff"
+                   , line=dict(dash='dash', color="grey")),
+        secondary_y=True,
+    )
+
+    fig.update_yaxes(rangemode="tozero")
 
     # Update chart title and labels
     fig.update_layout(
-        #title="Projected " + print_location + " COVID-19 cases, extrapolated from simple estimate of R_eff"
-        yaxis_title="Daily cases"
-        , legend=dict(
+        legend=dict(
             orientation="h",
             yanchor="bottom",
             y=-0.2,
             xanchor="left",
-            x=0.2)
+            x=0.1)
         , margin={'t': 15}
+    )
+    fig.update_yaxes(title_text="Daily cases", secondary_y=False)
+    fig.update_yaxes(title_text="R_eff",
+                    showgrid = False,
+                    range=[0,2],
+                    secondary_y=True)
+
+    # Add range slider
+    fig.update_xaxes(range = [
+        plot_data["report_date"].max() - pd.to_timedelta(90, unit = "d")
+        , plot_data["report_date"].max()
+    ])
+    fig.update_layout(
+        xaxis=dict(
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=1,
+                         label="1m",
+                         step="month",
+                         stepmode="backward"),
+                    dict(count=2,
+                         label="2m",
+                         step="month",
+                         stepmode="backward"),
+                    dict(count=3,
+                         label="3m",
+                         step="month",
+                         stepmode="backward"), # Default
+                    dict(count=6,
+                         label="6m",
+                         step="month",
+                         stepmode="backward"),
+                    dict(label = "All data",
+                        step="all")
+                ])
+            ),
+            # rangeslider=dict(
+            #     visible=True
+            # ),
+            type="date"
+        )
     )
 
     return fig
@@ -386,67 +501,7 @@ def plot_projected_claims(p_data):
 # ------------- App callbacks --------------------
 # In Shiny, all this would go into a server.R script - investigate best practice in Dash
 
-# First callback to process data and update dataframe
-@app.callback(
-    [Output('intermediate_data', 'data'),
-     Output('est_curr_R_eff', 'data')],
-    [Input('input_location', 'value')]
-)
-
-def apply_user_inputs_to_data(input_location):
-
-    print("apply_user_inputs_to_data")
-    print(input_location)
-
-    # Process data and fetch required cols (report_date/location/daily_cases)
-    intermediate_data = process_data(p_data=raw_covid_df
-                            , p_location=input_location)
-
-    # Add smoothed trend
-    intermediate_data = smooth_data(p_data=intermediate_data
-                            , p_rolling_window=7)
-
-    # Estimate current effective reproduction rate
-    est_curr_R_eff = estimate_R_eff(p_data=intermediate_data
-                                    , p_assum_incubation_days=assum_incubation_days
-                                    )
-    print(est_curr_R_eff)
-
-    return intermediate_data.to_json(date_format='iso', orient='split'), est_curr_R_eff
-
-
-# Second callback to plot chart from processed data
-@app.callback(
-    Output('fig_projected_chart', 'figure'),
-    [Input('intermediate_data', 'data'),
-     Input('est_curr_R_eff', 'data'),
-     Input('input_days_to_project', 'value')]
-)
-
-def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project):
-
-    print("update_plot")
-
-    # Read back in intermediate data stored from previous callback
-    covid_df = pd.read_json(intermediate_data, orient='split')
-    print(covid_df.head())
-    print(est_curr_R_eff)
-
-    # Add projections to covid_df
-    covid_df = project_cases_from_R_eff(
-        p_days_to_project=input_days_to_project
-        , p_data=covid_df
-        , p_R_eff=est_curr_R_eff
-        , p_assum_incubation_days=assum_incubation_days
-    )
-
-    fig = plot_projected_claims(p_data = covid_df)
-
-    print("fig ran")
-
-    return fig
-
-# Callbacks for text outputs
+# Callback for chart title
 @app.callback(
     Output('text_projected_chart_title', 'children'),
     [Input('input_location', 'value')]
@@ -455,16 +510,123 @@ def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project):
 def print_chart_content_title(location):
     return 'Projected {} COVID-19 cases'.format(location)
 
+# First callback to process data and update dataframe
 @app.callback(
-    Output('text_R_eff_print', 'children'),
-    [Input('est_curr_R_eff', 'data')]
+    [Output('intermediate_data', 'data'),
+     Output('est_curr_R_eff', 'data')],
+    [Input('input_location', 'value')]
 )
 
-def print_chart_content_title(est_curr_R_eff):
-    text = 'Projected cases are based on an estimated current R_eff  of ' + str(est_curr_R_eff) + \
-            ' as at ' + str(datetime.datetime.strptime(max_date, '%Y-%m-%d').strftime('%d %B %Y')) + '.'
-    return text
+def update_data(input_location):
 
+    print("update_data")
+    print(input_location)
+
+    # Process data and fetch required cols (report_date/location/daily_cases)
+    df = process_data(p_data=raw_covid_df
+                      , p_location=input_location)
+
+    # Add smoothed trend
+    df = smooth_data(p_data=df
+                     , p_rolling_window=7)
+
+    # Estimate current effective reproduction rate
+    df = estimate_R_eff(p_data=df
+                        , p_assum_incubation_days=assum_incubation_days)
+
+    est_curr_R_eff = df[df['report_date'] == df["report_date"].max()]['R_eff'].values[0]
+
+    return df.to_json(date_format='iso', orient='split'), est_curr_R_eff
+
+# Intermediate callback to change button (estimated or custom R_eff) colours on click
+# and store which button is clicked
+@app.callback(
+    [Output("input_use_est", "style"), # Return styles of use estimated/custom R_eff buttons
+     Output("input_use_cust", "style"),
+     Output("store_estcust_mode", "value"), # Return value telling us which button user clicked
+     Output('div_cond_input', 'style')], # Return style to show or hide custom R_eff input box
+    [Input("input_use_est", "n_clicks"),
+     Input("input_use_cust", "n_clicks")]
+)
+def set_active(est_clicks, cust_clicks): #*args
+    ctx = dash.callback_context
+
+    # get id of triggering button
+    button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    print(button_id)
+    print(est_clicks)
+    print(cust_clicks)
+
+    if (cust_clicks > 0) & (button_id == "input_use_cust"):
+        return button_off_style, button_on_style, button_id, {"display":"block"}
+    else:
+        button_id = "input_use_est"
+        return button_on_style, button_off_style, button_id, {"display":"none"}
+
+# Second callback to add projections and plot chart from processed data
+@app.callback(
+    [Output('fig_projected_chart', 'figure'),
+     Output('text_R_eff_print', 'children')],
+    [Input('intermediate_data', 'data'),
+     Input('est_curr_R_eff', 'data'),
+     Input('input_days_to_project', 'value'),
+     Input('store_estcust_mode', 'value'),
+     Input('input_cust_R_eff', 'value'),
+     Input('input_scenario_worse', 'n_clicks'),
+     Input('input_scenario_stable', 'n_clicks')]
+)
+
+def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project, store_estcust_mode,
+                input_cust_R_eff,input_scenario_worse, input_scenario_stable):
+
+    print("update_plot")
+
+    # Read back in intermediate data stored from previous callback
+    covid_df = pd.read_json(intermediate_data, orient='split')
+    print(covid_df.head())
+    print(est_curr_R_eff)
+
+    # Get button (scenarios)
+    ctx = dash.callback_context
+    changed_id = [p['prop_id'] for p in ctx.triggered][0]
+    print(changed_id)
+
+    # Define R_eff to use in projections
+    if (store_estcust_mode == "input_use_est") or (store_estcust_mode is None):
+        use_R_eff = est_curr_R_eff
+    elif 'input_scenario_worse' in changed_id:
+        use_R_eff = assum_worse
+    elif 'input_scenario_stable' in changed_id:
+        use_R_eff = assum_stable
+    else:
+        use_R_eff = input_cust_R_eff
+
+    print(use_R_eff)
+
+    # Add projections to covid_df
+    covid_df = project_cases_from_R_eff(
+        p_days_to_project=input_days_to_project
+        , p_data=covid_df
+        , p_R_eff=use_R_eff
+        , p_assum_incubation_days=assum_incubation_days
+    )
+
+    # Generate plotly fig
+    fig = plot_projected_claims(p_data = covid_df)
+
+    print("fig ran")
+
+    # Generate plot text
+    if store_estcust_mode == "input_use_est":
+        insert = 'an estimated current R_eff  of ' + str(est_curr_R_eff)
+    else:
+        insert = 'inputted R_eff of ' + str(use_R_eff)
+
+    text = 'Projected cases are based on ' + insert + \
+            ' as at ' + str(datetime.datetime.strptime(max_date, '%Y-%m-%d').strftime('%d %B %Y')) + '.'
+
+    return fig, text
 
 # ------------------ Run app -----------------------
 if __name__ == '__main__':
