@@ -135,7 +135,20 @@ sidebar = html.Div(
         ]),
         html.Div([
             html.Div([
-                html.Label(['R_eff'], style={'font-weight': 'bold'})
+                html.Div(html.Label(['R_eff value'], style={'font-weight': 'bold', 'padding-right':'5px'}), style={'display': 'inline-block'}),
+                html.Div(id = 'info_R_eff',
+                         children = [html.I(className="fas fa-info-circle")]
+                         , style={'display': 'inline-block'}),
+                # tooltip linked to the div for the info circle
+                dbc.Tooltip(
+                    "R_eff is the effective reproduction number "
+                    "which represents the transmission rate of the virus in "
+                    "the population. "
+                    "Select 'Estimated' for projection using estimated value "
+                    "of current R_eff, or 'Custom' to input your own.",
+                    target="info_R_eff",
+                    placement="right"
+                ),
             ]),
             html.Div([
                 html.Button('Estimated', id='input_use_est', n_clicks=0, style= button_on_style),
@@ -143,7 +156,8 @@ sidebar = html.Div(
             ], style = {'padding-bottom':'10px'}),
             # separate div to conditionally show
             html.Div(id = "div_cond_input"
-                     , children = [dcc.Input(id='input_cust_R_eff', value=None, type='number', min=0.01, max=10, step=0.01,
+                     , children = [dbc.Input(id='input_cust_R_eff', value=None, type='number', min=0.01, max=10, step=0.01,
+                                             placeholder = 'Input value',
                                              style = {"width": 180})]
                      , style = {"display":"none"})
         ]),
@@ -172,8 +186,9 @@ content = html.Div(
                     html.P(""),
                     html.Div(id='text_projected_chart_title', style={"width": "80vw", 'font-weight': 'bold'}),
                     html.Div(id='text_R_eff_print'),
-                    dcc.Graph(
-                        id='fig_projected_chart',
+                    dbc.Spinner( # add spinner to chart while it loads
+                        children = [dcc.Graph(id='fig_projected_chart')],
+                        spinner_style={"width": "3rem", "height": "3rem"}
                     )
                 ]),
 
