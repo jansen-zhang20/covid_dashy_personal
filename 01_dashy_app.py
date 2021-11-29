@@ -41,7 +41,7 @@ assum_incubation_days = 5
 
 # Assumptions for R_eff for scenarios
 assum_stable = 1.02
-assum_worse = 1.1
+assum_worse = 1.35
 
 # ---------- Load and process data ------------------
 
@@ -348,9 +348,8 @@ def estimate_R_eff(p_data, p_assum_incubation_days):
 
     added_data = p_data
 
-    added_data["lag_cases"] = added_data["smooth_cases"].shift(assum_incubation_days)
-    added_data["R_eff"] = (added_data["smooth_cases"] / added_data["lag_cases"]) ** (
-                1 / p_assum_incubation_days)
+    added_data["lag_cases"] = added_data["smooth_cases"].shift(1)
+    added_data["R_eff"] = (added_data["smooth_cases"] / added_data["lag_cases"]) ** p_assum_incubation_days
     added_data["R_eff"] = round(added_data["R_eff"], 2)
 
     return added_data
@@ -457,6 +456,7 @@ def plot_projected_claims(p_data):
     fig.update_yaxes(title_text="Daily cases", secondary_y=False)
     fig.update_yaxes(title_text="R_eff",
                     showgrid = False,
+                    range=[0,2],
                     secondary_y=True)
 
     # Add range slider
