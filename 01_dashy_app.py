@@ -16,6 +16,7 @@ import dash_daq as daq
 import dash_table
 
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 # To render plots to browser
 # import plotly.io as pio
 # pio.renderers.default = "browser"
@@ -33,9 +34,6 @@ from datetime import date, timedelta
 # -------------- Assumptions -----------------------
 
 secondary_github_data_web = 'https://raw.githubusercontent.com/M3IT/COVID-19_Data/master/Data/COVID_AU_state.csv'
-
-assum_days_to_show = 60
-assum_start_date = pd.to_datetime('today') - timedelta(days = assum_days_to_show)
 
 # Assumption for length of incubation period in days
 # Literature seems to suggest between 5-7 days
@@ -299,26 +297,23 @@ def smooth_data(p_data, p_rolling_window):
         .mean() \
         .round(0)
 
-    # Filter only last [assum_start_date = 60] days - also drops NaNs from rolling avg so we can convert to int
-    smoothed_data = smoothed_data.query("report_date >= @assum_start_date")
-    smoothed_data["smooth_cases"] = smoothed_data["smooth_cases"].astype(int)
+    smoothed_data["smooth_cases"] = smoothed_data["smooth_cases"].astype('Int64')
 
     return smoothed_data
 
 # Function - Simple estimate of current effective reproductive factor of the virus, based on the growth rate over the
 # last [assum_incubation_days = 5] days
 def estimate_R_eff(p_data, p_assum_incubation_days):
-    max_date = max(p_data["report_date"])
-    lag_date = max_date - timedelta(days=p_assum_incubation_days)
+    #R_eff = (curr_cases / lag_cases) ** (1 / p_assum_incubation_days)
 
-    curr_cases = p_data[p_data["report_date"] == max_date]["smooth_cases"].values[0]
-    lag_cases = p_data[p_data["report_date"] == lag_date]["smooth_cases"].values[0]
+    added_data = p_data
 
-    R_eff = (curr_cases / lag_cases) ** (1 / assum_incubation_days)
+    added_data["lag_cases"] = added_data["smooth_cases"].shift(assum_incubation_days)
+    added_data["R_eff"] = (added_data["smooth_cases"] / added_data["lag_cases"]) ** (
+                1 / p_assum_incubation_days)
+    added_data["R_eff"] = round(added_data["R_eff"], 2)
 
-    R_eff = round(R_eff, 2)
-
-    return R_eff
+    return added_data
 
 # Function - Project cases - projection is based on exponential growth with factor
 # p_R_eff/p_assum_incubation_days
@@ -348,6 +343,7 @@ def project_cases_from_R_eff(p_days_to_project, p_data, p_R_eff, p_assum_incubat
         , 'daily_cases': np.repeat(np.NaN, p_days_to_project)
         , 'smooth_cases': np.repeat(np.NaN, p_days_to_project)
         , 'projected_cases': proj_cases.values
+        , 'projected_R_eff': np.repeat(p_R_eff, p_days_to_project)
     }
     projected_df = pd.DataFrame(projected_df)
 
@@ -360,7 +356,11 @@ def plot_projected_claims(p_data):
 
     plot_data = p_data
 
-    fig = go.Figure()
+    plot_data['report_date'] = pd.to_datetime(plot_data['report_date'], format='%Y-%m-%d', utc = True)
+
+    #fig = go.Figure()
+    # Create figure with secondary y-axis
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
 
     # Trace for daily cases
     fig.add_trace(
@@ -384,21 +384,75 @@ def plot_projected_claims(p_data):
                    , line=dict(dash='dash')
                    , name="Projected cases"))
 
-    fig.update_yaxes(rangemode="tozero")
+    # Trace for R_eff
+    fig.add_trace(
+        go.Scatter(x=plot_data['report_date']
+                   , y=plot_data["R_eff"]
+                   , name="Estimated R_eff"
+                   , line=dict(color="grey")),
+        secondary_y=True,
+    )
 
-    #print_location = plot_data["location"].unique()[0]
+    # Trace for projected R_eff
+    fig.add_trace(
+        go.Scatter(x=plot_data['report_date']
+                   , y=plot_data["projected_R_eff"]
+                   , name = "Projected R_eff"
+                   , line=dict(dash='dash', color="grey")),
+        secondary_y=True,
+    )
+
+    fig.update_yaxes(rangemode="tozero")
 
     # Update chart title and labels
     fig.update_layout(
-        #title="Projected " + print_location + " COVID-19 cases, extrapolated from simple estimate of R_eff"
-        yaxis_title="Daily cases"
-        , legend=dict(
+        legend=dict(
             orientation="h",
             yanchor="bottom",
             y=-0.2,
             xanchor="left",
-            x=0.2)
+            x=0.1)
         , margin={'t': 15}
+    )
+    fig.update_yaxes(title_text="Daily cases", secondary_y=False)
+    fig.update_yaxes(title_text="R_eff",
+                    showgrid = False,
+                    secondary_y=True)
+
+    # Add range slider
+    fig.update_xaxes(range = [
+        plot_data["report_date"].max() - pd.to_timedelta(90, unit = "d")
+        , plot_data["report_date"].max()
+    ])
+    fig.update_layout(
+        xaxis=dict(
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=1,
+                         label="1m",
+                         step="month",
+                         stepmode="backward"),
+                    dict(count=2,
+                         label="2m",
+                         step="month",
+                         stepmode="backward"),
+                    dict(count=3,
+                         label="3m",
+                         step="month",
+                         stepmode="backward"), # Default
+                    dict(count=6,
+                         label="6m",
+                         step="month",
+                         stepmode="backward"),
+                    dict(label = "All data",
+                        step="all")
+                ])
+            ),
+            # rangeslider=dict(
+            #     visible=True
+            # ),
+            type="date"
+        )
     )
 
     return fig
@@ -414,34 +468,37 @@ def plot_projected_claims(p_data):
     [Input('input_location', 'value')]
 )
 
-def apply_user_inputs_to_data(input_location):
+def update_data(input_location):
 
-    print("apply_user_inputs_to_data")
+    print("update_data")
     print(input_location)
 
     # Process data and fetch required cols (report_date/location/daily_cases)
-    intermediate_data = process_data(p_data=raw_covid_df
-                            , p_location=input_location)
+    df = process_data(p_data=raw_covid_df
+                      , p_location=input_location)
 
     # Add smoothed trend
-    intermediate_data = smooth_data(p_data=intermediate_data
-                            , p_rolling_window=7)
+    df = smooth_data(p_data=df
+                     , p_rolling_window=7)
 
     # Estimate current effective reproduction rate
-    est_curr_R_eff = estimate_R_eff(p_data=intermediate_data
-                                    , p_assum_incubation_days=assum_incubation_days
-                                    )
-    print(est_curr_R_eff)
+    df = estimate_R_eff(p_data=df
+                        , p_assum_incubation_days=assum_incubation_days)
 
-    return intermediate_data.to_json(date_format='iso', orient='split'), est_curr_R_eff
+    est_curr_R_eff = df[df['report_date'] == df["report_date"].max()]['R_eff'].values[0]
+
+    # Only show X days of data
+    #df = df.query("report_date >= @assum_start_date")
+
+    return df.to_json(date_format='iso', orient='split'), est_curr_R_eff
 
 # Intermediate callback to change button (estimated or custom R_eff) colours on click
 # and store which button is clicked
 @app.callback(
-    [Output("input_use_est", "style"),
+    [Output("input_use_est", "style"), # Return styles of use estimated/custom R_eff buttons
      Output("input_use_cust", "style"),
-     Output("store_estcust_mode", "value"),
-     Output('div_cond_input', 'style')],
+     Output("store_estcust_mode", "value"), # Return value telling us which button user clicked
+     Output('div_cond_input', 'style')], # Return style to show or hide custom R_eff input box
     [Input("input_use_est", "n_clicks"),
      Input("input_use_cust", "n_clicks")]
 )
