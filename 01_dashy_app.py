@@ -459,40 +459,67 @@ def plot_projected_claims(p_data):
                     range=[0,2],
                     secondary_y=True)
 
-    # Add range slider
+    ### Range selection
+
+    # Set default
     fig.update_xaxes(range = [
-        plot_data["report_date"].max() - pd.to_timedelta(90, unit = "d")
-        , plot_data["report_date"].max()
+        pd.to_datetime(max_date, format='%Y-%m-%d') - pd.to_timedelta(60, unit="d"),
+        plot_data["report_date"].max()
     ])
+
+    # Use custom buttons instead of rangeselector so we can go backwards from last reported date
     fig.update_layout(
-        xaxis=dict(
-            rangeselector=dict(
-                buttons=list([
-                    dict(count=1,
-                         label="1m",
-                         step="month",
-                         stepmode="backward"),
-                    dict(count=2,
-                         label="2m",
-                         step="month",
-                         stepmode="backward"),
-                    dict(count=3,
-                         label="3m",
-                         step="month",
-                         stepmode="backward"), # Default
-                    dict(count=6,
-                         label="6m",
-                         step="month",
-                         stepmode="backward"),
-                    dict(label = "All data",
-                        step="all")
-                ])
-            ),
-            # rangeslider=dict(
-            #     visible=True
-            # ),
-            type="date"
-        )
+        updatemenus = [
+            dict(
+                type = "buttons",
+                direction = "left",
+                buttons = list([
+                    dict(
+                        args=["xaxis.range", [pd.to_datetime(max_date, format='%Y-%m-%d') - pd.to_timedelta(30, unit="d"),
+                                        plot_data["report_date"].max()]],
+                        label="1m",
+                        method="relayout"
+                    ),
+                    dict(
+                        args=["xaxis.range", [pd.to_datetime(max_date, format='%Y-%m-%d') - pd.to_timedelta(60, unit="d"),
+                                        plot_data["report_date"].max()]],
+                        label="2m",
+                        method="relayout"
+                    ),
+                    dict(
+                        args=["xaxis.range", [pd.to_datetime(max_date, format='%Y-%m-%d') - pd.to_timedelta(90, unit="d"),
+                                        plot_data["report_date"].max()]],
+                        label="3m",
+                        method="relayout"
+                    ),
+                    dict(
+                        args=["xaxis.range", [pd.to_datetime(max_date, format='%Y-%m-%d') - pd.to_timedelta(180, unit="d"),
+                                        plot_data["report_date"].max()]],
+                        label="6m",
+                        method="relayout"
+                    ),
+                    dict(
+                        args=["xaxis.range", [plot_data["report_date"].min(),
+                                        plot_data["report_date"].max()]],
+                        label="All data",
+                        method="relayout"
+                    )
+                ]),
+                pad={"r": 10, "t": 10},
+                showactive=True,
+                x=0.09,
+                xanchor="left",
+                y=1.2,
+                yanchor="top"
+            )
+        ]
+    )
+
+    # Add annotation
+    fig.update_layout(
+        annotations=[
+            dict(text="Reported data:", showarrow=False, y=1.14, yref="paper", x=0, xref="paper")
+        ]
     )
 
     return fig
