@@ -132,7 +132,7 @@ sidebar = html.Div(
         html.Div([
             html.Label(['Days to project'], style={'font-weight': 'bold'}),
             dcc.Input(id='input_days_to_project',
-                      value=14,
+                      value=30,
                       type='number',
                       min=1,
                       style={"margin-bottom": "10px", 'width': 180})
@@ -254,7 +254,7 @@ content = html.Div(
                         html.P("To calculate a smooth trend, a simple methodology taking a rolling 7-day average of daily cases was applied to account for daily variability"
                                + " in reported cases as well as weekly seasonality (Monday dip in reported cases). ",
                                style={"width": "75vw"}),
-                        html.P("R_eff (the effective viral reproduction rate) is estimated by R_eff(t_current) = [cases(t_current)/cases(t_current - incubation_period)]**(1/incubation_period)"
+                        html.P("R_eff (the effective viral reproduction rate) is estimated by R_eff(t_current) = [cases(t_current)/cases(t_current - 1)]**incubation_period"
                                + ", with an assumed incubation period of 5 days based on most recent studies.",
                                style={"width": "75vw"}),
                         html.P("Projected cases extrapolates from the latest estimate of R_eff and assumes a flat growth rate. No adjustments are currently being made for changing"
