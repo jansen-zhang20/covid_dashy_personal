@@ -39,6 +39,10 @@ secondary_github_data_web = 'https://raw.githubusercontent.com/M3IT/COVID-19_Dat
 # Literature seems to suggest between 5-7 days
 assum_incubation_days = 5
 
+# Assumptions for R_eff for scenarios
+assum_stable = 1.02
+assum_worse = 1.1
+
 # ---------- Load and process data ------------------
 
 raw_covid_df = pd.read_csv(secondary_github_data_web)\
@@ -108,7 +112,7 @@ header = html.Div([
     ], style=HEADER_STYLE
 )
 
-button_on_style = {'background-color':'green'}
+button_on_style = {'background-color':'green', "color": "white"}
 button_off_style = {'background-color':"#ECE8E4"}
 
 sidebar = html.Div(
@@ -158,7 +162,28 @@ sidebar = html.Div(
             html.Div(id = "div_cond_input"
                      , children = [dbc.Input(id='input_cust_R_eff', value=None, type='number', min=0.01, max=10, step=0.01,
                                              placeholder = 'Input value',
-                                             style = {"width": 180})]
+                                             style = {"width": 180}),
+                                   html.P("or select from pre-specified scenarios below:",
+                                          style={"color":"grey", "margin-top":'5px', "margin-bottom":'5px'}),
+
+                                   html.Button('Stable',
+                                               id='input_scenario_stable',
+                                               style = {'background-color':"#A10559", "color": "white"}),
+                                   dbc.Tooltip(
+                                       "Simple scenario where cases remain fairly stable, with R_eff of " + str(assum_stable),
+                                       target="input_scenario_stable",
+                                       placement="bottom"
+                                   ),
+
+                                   html.Button('Worse',
+                                               id='input_scenario_worse',
+                                               style = {'background-color':"#CC5500", "color": "white"}),
+                                   dbc.Tooltip(
+                                       "Simple scenario where cases are growing, with R_eff of " + str(assum_worse),
+                                       target="input_scenario_worse",
+                                       placement="bottom"
+                                   ),
+                                   ]
                      , style = {"display":"none"})
         ]),
 
@@ -476,6 +501,15 @@ def plot_projected_claims(p_data):
 # ------------- App callbacks --------------------
 # In Shiny, all this would go into a server.R script - investigate best practice in Dash
 
+# Callback for chart title
+@app.callback(
+    Output('text_projected_chart_title', 'children'),
+    [Input('input_location', 'value')]
+)
+
+def print_chart_content_title(location):
+    return 'Projected {} COVID-19 cases'.format(location)
+
 # First callback to process data and update dataframe
 @app.callback(
     [Output('intermediate_data', 'data'),
@@ -501,9 +535,6 @@ def update_data(input_location):
                         , p_assum_incubation_days=assum_incubation_days)
 
     est_curr_R_eff = df[df['report_date'] == df["report_date"].max()]['R_eff'].values[0]
-
-    # Only show X days of data
-    #df = df.query("report_date >= @assum_start_date")
 
     return df.to_json(date_format='iso', orient='split'), est_curr_R_eff
 
@@ -533,17 +564,21 @@ def set_active(est_clicks, cust_clicks): #*args
         button_id = "input_use_est"
         return button_on_style, button_off_style, button_id, {"display":"none"}
 
-# Second callback to plot chart from processed data
+# Second callback to add projections and plot chart from processed data
 @app.callback(
-    Output('fig_projected_chart', 'figure'),
+    [Output('fig_projected_chart', 'figure'),
+     Output('text_R_eff_print', 'children')],
     [Input('intermediate_data', 'data'),
      Input('est_curr_R_eff', 'data'),
      Input('input_days_to_project', 'value'),
      Input('store_estcust_mode', 'value'),
-     Input('input_cust_R_eff', 'value')]
+     Input('input_cust_R_eff', 'value'),
+     Input('input_scenario_worse', 'n_clicks'),
+     Input('input_scenario_stable', 'n_clicks')]
 )
 
-def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project, store_estcust_mode, input_cust_R_eff):
+def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project, store_estcust_mode,
+                input_cust_R_eff,input_scenario_worse, input_scenario_stable):
 
     print("update_plot")
 
@@ -552,10 +587,22 @@ def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project, store_
     print(covid_df.head())
     print(est_curr_R_eff)
 
-    if store_estcust_mode == "input_use_est":
+    # Get button (scenarios)
+    ctx = dash.callback_context
+    changed_id = [p['prop_id'] for p in ctx.triggered][0]
+    print(changed_id)
+
+    # Define R_eff to use in projections
+    if (store_estcust_mode == "input_use_est") or (store_estcust_mode is None):
         use_R_eff = est_curr_R_eff
+    elif 'input_scenario_worse' in changed_id:
+        use_R_eff = assum_worse
+    elif 'input_scenario_stable' in changed_id:
+        use_R_eff = assum_stable
     else:
         use_R_eff = input_cust_R_eff
+
+    print(use_R_eff)
 
     # Add projections to covid_df
     covid_df = project_cases_from_R_eff(
@@ -565,39 +612,21 @@ def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project, store_
         , p_assum_incubation_days=assum_incubation_days
     )
 
+    # Generate plotly fig
     fig = plot_projected_claims(p_data = covid_df)
 
     print("fig ran")
 
-    return fig
-
-# Callbacks for text outputs
-@app.callback(
-    Output('text_projected_chart_title', 'children'),
-    [Input('input_location', 'value')]
-)
-
-def print_chart_content_title(location):
-    return 'Projected {} COVID-19 cases'.format(location)
-
-@app.callback(
-    Output('text_R_eff_print', 'children'),
-    [Input('est_curr_R_eff', 'data'),
-     Input('store_estcust_mode', 'value'),
-     Input('input_cust_R_eff', 'value')]
-)
-
-def print_chart_content_title(est_curr_R_eff, store_estcust_mode, input_cust_R_eff):
-
+    # Generate plot text
     if store_estcust_mode == "input_use_est":
         insert = 'an estimated current R_eff  of ' + str(est_curr_R_eff)
     else:
-        insert = 'inputted R_eff of ' + str(input_cust_R_eff)
+        insert = 'inputted R_eff of ' + str(use_R_eff)
 
     text = 'Projected cases are based on ' + insert + \
             ' as at ' + str(datetime.datetime.strptime(max_date, '%Y-%m-%d').strftime('%d %B %Y')) + '.'
-    return text
 
+    return fig, text
 
 # ------------------ Run app -----------------------
 if __name__ == '__main__':
