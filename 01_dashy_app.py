@@ -35,9 +35,8 @@ from datetime import date, timedelta
 
 secondary_github_data_web = 'https://raw.githubusercontent.com/M3IT/COVID-19_Data/master/Data/COVID_AU_state.csv'
 
-# Assumption for length of incubation period in days
-# Literature seems to suggest between 5-7 days
-assum_incubation_days = 5
+# Assumption for mean generation period
+assum_mean_generation = 5
 
 # Assumptions for R_eff for scenarios
 assum_stable = 1.02
@@ -149,9 +148,9 @@ sidebar = html.Div(
                          , style={'display': 'inline-block'}),
                 # tooltip linked to the div for the info circle
                 dbc.Tooltip(
-                    "R_eff is the effective reproduction number "
-                    "which represents the transmission rate of the virus in "
-                    "the population. "
+                    "R_eff or R_t is the effective reproduction number "
+                    "which represents, on average, how many people one infected individual "
+                    "spreads the virus to. "
                     "Select 'Estimated' for projection using estimated value "
                     "of current R_eff, or 'Custom' to input your own.",
                     target="info_R_eff",
@@ -174,7 +173,7 @@ sidebar = html.Div(
                                                id='input_scenario_stable',
                                                style = {'background-color':"#A10559", "color": "white"}),
                                    dbc.Tooltip(
-                                       "Simple scenario where cases remain fairly stable, with R_eff of " + str(assum_stable),
+                                       "Simple scenario where cases remain fairly stable, with a flat R_eff of " + str(assum_stable),
                                        target="input_scenario_stable",
                                        placement="bottom"
                                    ),
@@ -183,7 +182,7 @@ sidebar = html.Div(
                                                id='input_scenario_worse',
                                                style = {'background-color':"#CC5500", "color": "white"}),
                                    dbc.Tooltip(
-                                       "Simple scenario where cases are growing, with R_eff of " + str(assum_worse),
+                                       "Simple scenario where cases are growing, with a flat R_eff of " + str(assum_worse),
                                        target="input_scenario_worse",
                                        placement="bottom"
                                    ),
@@ -222,12 +221,12 @@ content = html.Div(
                 ]),
 
                 # Data table
-                dcc.Tab(label = 'Data table'
+                dcc.Tab(label = 'Chart data'
                         , style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE
                         , children = [
                         html.P(""),
                         #html.P("Showing " + str(assum_days_to_show) + " days of data:", style={"width": "70vw"}),
-                        html.P("Showing chart data as table:", style={"width": "77vw"}),
+                        html.P("Showing projection data in tabulated form:", style={"width": "77vw"}),
                         dbc.Spinner(
                             children = [html.Div(id='tbl_projected')], # return from callback
                             spinner_style={"width": "3rem", "height": "3rem"}
@@ -246,11 +245,13 @@ content = html.Div(
                         html.P("To calculate a smooth trend, a simple methodology taking a rolling 7-day average of daily cases was applied to account for daily variability"
                                + " in reported cases as well as weekly seasonality (Monday dip in reported cases). ",
                                style={"width": "75vw"}),
-                        html.P("R_eff (the effective viral reproduction rate) is estimated by R_eff(t_current) = [cases(t_current)/cases(t_current - 1)]**incubation_period"
-                               + ", with an assumed incubation period of 5 days based on most recent studies.",
+                        html.P("R_eff (the effective viral reproduction rate) is estimated by R_eff(t_current) = cases(t_current)/cases(t_current - assum_mean_generation)"
+                               + ", with an assumed mean generation interval of 5 days. This is an estimate of R_eff based on the intuitive"
+                               + " understanding that if on average each infector takes 5 days to infect others, the growth rate over 5 days will approximate R_eff."
+                               + " It has the benefit of simplicity and having direct equivalence to the growth rate r.",
                                style={"width": "75vw"}),
-                        html.P("Projected cases extrapolates from the latest estimate of R_eff and assumes a flat growth rate. No adjustments are currently being made for changing"
-                               + " real-world factors which may impact viral spread such as vaccination uptake, easing of restrictions or increased transmission during holiday periods.",
+                        html.P("Projected cases extrapolates from the latest estimate of R_eff and assumes exponential growth at a constant rate. No adjustments are currently being made for changing"
+                               + " real-world factors which may impact viral spread such as vaccination uptake, imposition/easing of restrictions or increased transmission during holidays.",
                                style={"width": "75vw"}),
                         html.P(""),
 
@@ -334,21 +335,25 @@ def smooth_data(p_data, p_rolling_window):
     return smoothed_data
 
 # Function - Simple estimate of current effective reproductive factor of the virus, based on the growth rate over the
-# last [assum_incubation_days = 5] days
-def estimate_R_eff(p_data, p_assum_incubation_days):
-    #R_eff = (curr_cases / lag_cases) ** (1 / p_assum_incubation_days)
+# last [assum_mean_generation = 5] days
+def estimate_R_eff(p_data, p_assum_mean_generation):
 
     added_data = p_data
 
-    added_data["lag_cases"] = added_data["smooth_cases"].shift(1)
-    added_data["R_eff"] = (added_data["smooth_cases"] / added_data["lag_cases"]) ** p_assum_incubation_days
+    added_data["lag_cases"] = added_data["smooth_cases"].shift(p_assum_mean_generation)
+
+    # If taking r = growth rate over 1 step, then r^5
+    #added_data["R_eff"] = (added_data["smooth_cases"] / added_data["lag_cases"]) ** p_assum_mean_generation
+
+    # If taking r^5 = growth rate over 5 steps directly (applies more smoothing if 7d average wasn't good enough)
+    added_data["R_eff"] = (added_data["smooth_cases"] / added_data["lag_cases"])
+
     added_data["R_eff"] = round(added_data["R_eff"], 2)
 
     return added_data
 
 # Function - Project cases - projection is based on exponential growth with factor
-# p_R_eff/p_assum_incubation_days
-def project_cases_from_R_eff(p_days_to_project, p_data, p_R_eff, p_assum_incubation_days):
+def project_cases_from_R_eff(p_days_to_project, p_data, p_R_eff, p_assum_mean_generation):
 
     # Convert to date (to be safe)
     p_data['report_date'] = pd.to_datetime(p_data['report_date'], format='%Y-%m-%d')
@@ -360,7 +365,7 @@ def project_cases_from_R_eff(p_days_to_project, p_data, p_R_eff, p_assum_incubat
     # Projected date and cases -
     proj_date = pd.Series(range(1, p_days_to_project + 1))
 
-    proj_cases = curr_cases * p_R_eff ** (proj_date / p_assum_incubation_days)
+    proj_cases = curr_cases * p_R_eff ** (proj_date / p_assum_mean_generation)
     proj_cases = round(proj_cases, 0).astype(int)
 
     proj_date = curr_date + pd.to_timedelta(proj_date, unit='d')
@@ -551,7 +556,7 @@ def update_data(input_location):
 
     # Estimate current effective reproduction rate
     df = estimate_R_eff(p_data=df
-                        , p_assum_incubation_days=assum_incubation_days)
+                        , p_assum_mean_generation=assum_mean_generation)
 
     est_curr_R_eff = df[df['report_date'] == df["report_date"].max()]['R_eff'].values[0]
 
@@ -627,7 +632,7 @@ def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project, store_
         p_days_to_project=input_days_to_project
         , p_data=covid_df
         , p_R_eff=use_R_eff
-        , p_assum_incubation_days=assum_incubation_days
+        , p_assum_mean_generation=assum_mean_generation
     )
 
     # Generate plotly fig
