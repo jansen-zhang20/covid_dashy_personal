@@ -130,12 +130,16 @@ sidebar = html.Div(
                          style={"margin-bottom": "10px", 'width': 180})
         ]),
         html.Div([
-            html.Label(['Days to project'], style={'font-weight': 'bold'}),
-            dcc.Input(id='input_days_to_project',
+            html.Div(
+                html.Label(['Days to project'], style={'font-weight': 'bold'})
+            ),
+            html.Div( # separate div keeps to second line
+                dcc.Input(id='input_days_to_project',
                       value=30,
                       type='number',
                       min=1,
                       style={"margin-bottom": "10px", 'width': 180})
+            ),
         ]),
         html.Div([
             html.Div([
@@ -218,27 +222,15 @@ content = html.Div(
                 ]),
 
                 # Data table
-                dcc.Tab(label = 'Raw data'
+                dcc.Tab(label = 'Data table'
                         , style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE
                         , children = [
                         html.P(""),
                         #html.P("Showing " + str(assum_days_to_show) + " days of data:", style={"width": "70vw"}),
-                        html.P("Showing full data source:", style={"width": "77vw"}),
-                        dash_table.DataTable(
-                            data=raw_covid_df.to_dict('records'),
-                            columns=[{"name": i, "id": i} for i in raw_covid_df.columns],
-                            filter_action="native",
-                            sort_action="native",
-                            sort_mode="multi",
-                            page_action="native",
-                            page_current=0,
-                            page_size=10,
-                            style_header={'fontWeight': 'bold'},
-                            style_cell={'font-family':'Segoe UI'},
-                            style_table={'overflowX': 'auto',
-                                         "width": "77vw"},
-                            # fix left-most column getting cut off
-                            css=[{'selector': '.row', 'rule': 'margin: 0'}]
+                        html.P("Showing chart data as table:", style={"width": "77vw"}),
+                        dbc.Spinner(
+                            children = [html.Div(id='tbl_projected')], # return from callback
+                            spinner_style={"width": "3rem", "height": "3rem"}
                         )
                     ]),
 
@@ -292,7 +284,7 @@ app.layout = html.Div([
     sidebar,
     content,
 
-    # dcc.Store stores the intermediate data
+    # dcc.Store stores the intermediate data - some may be redundant
     dcc.Store(id='intermediate_data'),
     dcc.Store(id='est_curr_R_eff'),
     dcc.Store(id='store_estcust_mode')
@@ -507,7 +499,7 @@ def plot_projected_claims(p_data):
                 ]),
                 pad={"r": 10, "t": 10},
                 showactive=True,
-                x=0.09,
+                x=0.04,
                 xanchor="left",
                 y=1.2,
                 yanchor="top"
@@ -518,7 +510,7 @@ def plot_projected_claims(p_data):
     # Add annotation
     fig.update_layout(
         annotations=[
-            dict(text="Reported data:", showarrow=False, y=1.14, yref="paper", x=0, xref="paper")
+            dict(text="Reported data:", showarrow=False, y=1.14, yref="paper", x=-0.05, xref="paper")
         ]
     )
 
@@ -594,6 +586,7 @@ def set_active(est_clicks, cust_clicks): #*args
 # Second callback to add projections and plot chart from processed data
 @app.callback(
     [Output('fig_projected_chart', 'figure'),
+     Output('tbl_projected', 'children'),
      Output('text_R_eff_print', 'children')],
     [Input('intermediate_data', 'data'),
      Input('est_curr_R_eff', 'data'),
@@ -611,10 +604,8 @@ def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project, store_
 
     # Read back in intermediate data stored from previous callback
     covid_df = pd.read_json(intermediate_data, orient='split')
-    print(covid_df.head())
-    print(est_curr_R_eff)
 
-    # Get button (scenarios)
+    # Get button clicked (scenarios)
     ctx = dash.callback_context
     changed_id = [p['prop_id'] for p in ctx.triggered][0]
     print(changed_id)
@@ -644,6 +635,36 @@ def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project, store_
 
     print("fig ran")
 
+    ## Processing for table needs to be down here else doesn't run correctly (callback behaviour?)
+    # Convert dates read in as timestamps to just datetime
+    covid_df["report_date"] = pd.to_datetime(covid_df["report_date"]).apply(lambda x: x.date())
+    # Convert empty dicts {} read in from json to NaNs
+    covid_df = covid_df.explode('smooth_cases')
+    # Sort desc
+    covid_df = covid_df.sort_values(by='report_date', ascending=False)
+
+    # Generate table #["report_date", "location", "daily_cases", "smooth_cases", "R_eff"]
+    tbl_projected = html.Div([
+        dash_table.DataTable(
+            data=covid_df.to_dict('rows'),
+            columns=[{"name": x, "id": x} for x in ["report_date", "location", "daily_cases","smooth_cases",
+                                                    "projected_cases","R_eff", "projected_R_eff"]],
+            filter_action="native",
+            sort_action="native",
+            sort_mode="multi",
+            page_action="native",
+            page_current=0,
+            page_size=12,
+            style_header={'fontWeight': 'bold'},
+            style_cell={'font-family': 'Segoe UI'},
+            style_table={'overflowX': 'auto',
+                         "width": "77vw"},
+            # fix left-most column getting cut off
+            css=[{'selector': '.row', 'rule': 'margin: 0'}]
+        )
+    ])
+    print("table ran")
+
     # Generate plot text
     if store_estcust_mode == "input_use_est":
         insert = 'an estimated current R_eff  of ' + str(est_curr_R_eff)
@@ -653,7 +674,7 @@ def update_plot(intermediate_data, est_curr_R_eff, input_days_to_project, store_
     text = 'Projected cases are based on ' + insert + \
             ' as at ' + str(datetime.datetime.strptime(max_date, '%Y-%m-%d').strftime('%d %B %Y')) + '.'
 
-    return fig, text
+    return fig, tbl_projected, text
 
 # ------------------ Run app -----------------------
 if __name__ == '__main__':
